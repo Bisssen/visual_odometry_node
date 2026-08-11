@@ -3,8 +3,8 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from sensor_msgs.msg import Image
-from std_msgs.msg import Float32, Float32MultiArray
-from geometry_msgs.msg import Pose2D, PoseStamped
+from std_msgs.msg import Float32
+from geometry_msgs.msg import Point
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
@@ -180,8 +180,8 @@ class VONode(Node):
         
         # Publishers
         self.pose_pub = self.create_publisher(
-            Pose2D,
-            '/vo/pose',
+            Point,
+            '/visual_odometry/pose',
             10
         )
 
@@ -200,16 +200,22 @@ class VONode(Node):
         self.latest_height = msg.data
     
     def vo_loop(self):
+        if self.latest_height is None:
+            return
+
+        if self.latest_image is None:
+            return
+
         z = self.latest_height
 
         self.vo.process_frame(self.latest_image, self.latest_height)
         x, y = self.vo.get_position()
         
         # Publish as Pose2D
-        pose_msg = Pose2D()
+        pose_msg = Point()
         pose_msg.x = x
         pose_msg.y = y
-        pose_msg.theta = z  # Just use this for z, idgaf
+        pose_msg.z = z
         self.pose_pub.publish(pose_msg)
 
     def destroy_node(self):

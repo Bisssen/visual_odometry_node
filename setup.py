@@ -20,7 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'visual_odometry = visual_odometry.visual_odometry:main',
+            'visual_odometry_node = visual_odometry_node.visual_odometry_node:main',
         ],
     },
 )
