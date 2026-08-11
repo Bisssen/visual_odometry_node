@@ -200,23 +200,26 @@ class VONode(Node):
         self.latest_height = msg.data
     
     def vo_loop(self):
-        if self.latest_height is None:
-            return
+        while True:
+            if self.latest_height is None:
+                self.get_logger().warn('No distance measurement')
+                continue
 
-        if self.latest_image is None:
-            return
+            if self.latest_image is None:
+                self.get_logger().warn('No image')
+                continue
 
-        z = self.latest_height
+            z = self.latest_height
 
-        self.vo.process_frame(self.latest_image, self.latest_height)
-        x, y = self.vo.get_position()
-        
-        # Publish as Pose2D
-        pose_msg = Point()
-        pose_msg.x = x
-        pose_msg.y = y
-        pose_msg.z = z
-        self.pose_pub.publish(pose_msg)
+            self.vo.process_frame(self.latest_image, self.latest_height)
+            x, y = self.vo.get_position()
+            
+            # Publish as Pose2D
+            pose_msg = Point()
+            pose_msg.x = x
+            pose_msg.y = y
+            pose_msg.z = z
+            self.pose_pub.publish(pose_msg)
 
     def destroy_node(self):
         cv2.destroyAllWindows()
