@@ -335,13 +335,14 @@ class VONode(Node):
 
             if self.latest_image is None:
                 time.sleep(0.1)
-                self.get_logger().warn('No image')
+                # self.get_logger().warn('No image')
                 continue
 
             z = self.latest_height
             tmp_image = self.latest_image.copy()
             self.latest_image = None
 
+            self.get_logger().info('processing image')
             self.vo.process_frame(tmp_image, self.latest_height)
             x, y = self.vo.get_position()
             
