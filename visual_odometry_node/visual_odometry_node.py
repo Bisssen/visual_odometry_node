@@ -10,6 +10,33 @@ import cv2
 import numpy as np
 import threading
 import time
+import math
+from px4_msgs.msg import VehicleOdometry
+
+# from src.fisheye import FisheyeUndistorter
+
+def quaternion_to_yaw(q):
+    """
+    Extract yaw (rotation about Z) from a PX4 VehicleOdometry quaternion.
+    q is [w, x, y, z] as published by PX4 (q[0]=w, q[1]=x, q[2]=y, q[3]=z).
+    Returns yaw in radians.
+    """
+    w, x, y, z = q[0], q[1], q[2], q[3]
+    siny_cosp = 2.0 * (w * z + x * y)
+    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+    return math.atan2(siny_cosp, cosy_cosp)
+ 
+ 
+def rotate_by_yaw(dx_body, dy_body, yaw):
+    """
+    Rotate a body-frame displacement (forward, right) into the world frame
+    using the current yaw angle.
+    """
+    dx_world = dx_body * math.cos(yaw) - dy_body * math.sin(yaw)
+    dy_world = dx_body * math.sin(yaw) + dy_body * math.cos(yaw)
+    return dx_world, dy_world
+ 
+
 
 class MonoVideoOdometry:
     def __init__(self,
@@ -25,8 +52,8 @@ class MonoVideoOdometry:
         self.debug = debug
         self.detector = detector
         self.lk_params = lk_params
-        self.id = 0
         self.n_features = 0
+        self.yaw = 0
         
         cx = image_width / 2
         cy = image_height / 2
@@ -56,7 +83,7 @@ class MonoVideoOdometry:
         # return points
         points = cv2.goodFeaturesToTrack(
             img,
-            maxCorners=2000,
+            maxCorners=500,
             qualityLevel=0.01,
             minDistance=10,
             blockSize=7
@@ -72,9 +99,10 @@ class MonoVideoOdometry:
 
     def visual_odometry(self, height):
         # Detect new features if too many are lost
-        if self.n_features < 2000:
+        if self.n_features < 250:
             self.p0 = self.detect(self.old_frame)
 
+        print(self.n_features)
 
         # Calculate optical flow
         self.p1, st, err = cv2.calcOpticalFlowPyrLK(
@@ -88,24 +116,26 @@ class MonoVideoOdometry:
             print('No points')
             return
 
-        p0_back, st_back, _ = cv2.calcOpticalFlowPyrLK(
-            self.current_frame,
-            self.old_frame,
-            self.p1,
-            None,
-            **self.lk_params
-        )
+        # p0_back, st_back, _ = cv2.calcOpticalFlowPyrLK(
+        #     self.current_frame,
+        #     self.old_frame,
+        #     self.p1,
+        #     None,
+        #     **self.lk_params
+        # )
 
-        fb_error = np.linalg.norm(
-            self.p0 - p0_back,
-            axis=2
-        ).ravel()
+        # fb_error = np.linalg.norm(
+        #     self.p0 - p0_back,
+        #     axis=2
+        # ).ravel()
 
-        mask = (
-            (st.ravel() == 1) &
-            (st_back.ravel() == 1) &
-            (fb_error < 1.5)
-        )
+        # mask = (
+        #     (st.ravel() == 1) &
+        #     (st_back.ravel() == 1) &
+        #     (fb_error < 1.5)
+        # )
+
+        mask = st.ravel() == 1
 
         self.good_old = self.p0[mask]
         self.good_new = self.p1[mask]
@@ -185,62 +215,26 @@ class MonoVideoOdometry:
         )
 
         # Integrate
-        self.x += dx_ground
-        self.y += dy_ground
+        # self.x += dx_ground
+        # self.y += dy_ground
+        dx_world, dy_world = rotate_by_yaw(dx_ground, dy_ground, self.yaw)
+        self.x += dx_world * 2.2
+        self.y += dy_world * 2.2
+        
 
 
-        # # Need enough points
-        # if len(self.good_old) < 20:
-        #     print('not enough points')
-        #     return
+        self.p0 = self.good_new.reshape(-1, 1, 2)  # ← track survivors next frame
+        self.n_features = len(self.p0)              # ← add thi
+        print(self.n_features)
 
-        # # 1. Convert pixels to normalized camera rays
-        # old_pts = cv2.undistortPoints(self.good_old, self.K, None).reshape(-1, 2)
-        # new_pts = cv2.undistortPoints(self.good_new, self.K, None).reshape(-1, 2)
-
-        # # 2. Calculate Essential Matrix
-        # E, mask = cv2.findEssentialMat(
-        #     old_pts, new_pts, self.K,
-        #     method=cv2.RANSAC, prob=0.999, threshold=1.0
-        # )
-
-        # if E is None:
-        #     return
-
-        # # 3. Recover pose
-        # _, R, t, mask = cv2.recoverPose(E, old_pts, new_pts, self.K)
-
-        # # 4. Get translation in normalized coordinates
-        # tx = t[0][0]
-        # ty = t[1][0]
-
-        # print(tx,ty)
-
-        # # 5. Convert to world units using camera height
-        # scale = height / self.K[0, 0]  # Using fx from camera matrix
-
-        # # World displacement (negative because camera moves opposite to flow)
-        # dx_world = -tx * scale
-        # dy_world = -ty * scale
-
-        # # 6. Integrate position
-        # self.x += dx_world
-        # self.y += dy_world
-
-        # # Prepare next iteration
-        # self.old_frame = self.current_frame.copy()
-        # self.p0 = self.good_new.reshape(-1, 1, 2)
-        # self.n_features = len(self.p0)
-
-    def process_frame(self, frame, height):
-        if self.id < 2:
+    def process_frame(self, frame, height, yaw):
+        self.yaw = yaw
+        if self.current_frame is None:
             self.current_frame = frame
-            self.id = 2
         else:
             self.old_frame = self.current_frame
             self.current_frame = frame
             self.visual_odometry(height)
-            self.id += 1
             
     def get_position(self):
         return self.x, self.y
@@ -264,6 +258,8 @@ class VONode(Node):
         image_width = self.get_parameter('image_width').value
         self.debug = self.get_parameter('debug').value
         print(self.debug, type(self.debug))
+
+        # self.udistorter = FisheyeUndistorter(2704, 1540, 150, balance=0.0)
         
         # QoS for sensor data
         qos = QoSProfile(
@@ -294,7 +290,7 @@ class VONode(Node):
             self.image_callback,
             qos
         )
-        
+
         self.height_sub = self.create_subscription(
             Float32,
             '/rangefinder/distance',
@@ -309,6 +305,14 @@ class VONode(Node):
             10
         )
 
+        self.odom_sub = self.create_subscription(
+            VehicleOdometry,
+            '/fmu/out/vehicle_odometry',
+            self.odom_callback,
+            qos
+        )
+
+
         threading.Thread(target=self.vo_loop, daemon=True).start()
 
         # if self.debug:
@@ -321,10 +325,20 @@ class VONode(Node):
         cv_image = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
         
         # Convert to grayscale
-        self.latest_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+        
+        SCALE = 0.5
+        self.latest_image = cv2.resize(gray, (0, 0), fx=SCALE, fy=SCALE)
 
     def height_callback(self, msg):
-        self.latest_height = msg.data
+        # self.latest_height = msg.data
+        pass
+
+    def odom_callback(self, msg):
+        self.latest_height = msg.position[2] * -1  # if you're using this for height too
+        self.latest_yaw = quaternion_to_yaw(msg.q) + 1.57
+ 
+
     
     def vo_loop(self):
         while True:
@@ -334,16 +348,18 @@ class VONode(Node):
                 continue
 
             if self.latest_image is None:
-                time.sleep(0.1)
-                # self.get_logger().warn('No image')
+                time.sleep(0.001)
                 continue
 
+
             z = self.latest_height
+            yaw = self.latest_yaw
             tmp_image = self.latest_image.copy()
             self.latest_image = None
 
+
             self.get_logger().info('processing image')
-            self.vo.process_frame(tmp_image, self.latest_height)
+            self.vo.process_frame(tmp_image, z, yaw)
             x, y = self.vo.get_position()
             
             # Publish as Pose2D
@@ -353,6 +369,7 @@ class VONode(Node):
             pose_msg.z = z
             self.get_logger().info(f'{x}, {y}, {z}')
             self.pose_pub.publish(pose_msg)
+
 
     def destroy_node(self):
         cv2.destroyAllWindows()
