@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>vo_node</name>
+  <name>visual_odometry_node</name>
   <version>0.0.0</version>
   <description>Visual Odometry Node</description>
   <maintainer email="your_email@example.com">your_name</maintainer>

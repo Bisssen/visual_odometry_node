@@ -14,7 +14,13 @@ import math
 from px4_msgs.msg import VehicleOdometry
 
 # from src.fisheye import FisheyeUndistorter
-from src.mono_video_odometry import MonoVideoOdometry
+from .src.mono_video_odometry import MonoVideoOdometry
+
+# TODO
+# Cap the estimate update based on time based and a max speed, e.g. 20 m/s? Can also measure it
+# See if I cant find and use the correct camera parameters and see how it looks without manual tuning
+# Could also esimate the speed (We already do this) and then low pass filter it (idk 10 % new 90 % old)
+# # and then use the filtered speed for the position update
 
 class VONode(Node):
     def __init__(self):

@@ -27,6 +27,14 @@ def quaternion_to_rotation_matrix(q: list[float] | np.ndarray) -> np.ndarray:
         [2*(x*z - w*y),       2*(y*z + w*x),       1 - 2*(x*x + y*y)]
     ])
 
+def rotate_by_yaw(dx_body: float, dy_body: float, yaw: float) -> tuple[float, float]:
+    """
+    Rotate a body-frame displacement (forward, right) into the world frame
+    using the current yaw angle.
+    """
+    dx_world = dx_body * math.cos(yaw) - dy_body * math.sin(yaw)
+    dy_world = dx_body * math.sin(yaw) + dy_body * math.cos(yaw)
+    return dx_world, dy_world
 
 class MonoVideoOdometry:
     def __init__(self,
@@ -186,6 +194,7 @@ class MonoVideoOdometry:
 
         dx_world = world_vec[0] * scale
         dy_world = world_vec[1] * scale
+        dx_world, dy_world = rotate_by_yaw(dx_world, dy_world, 1.57)
 
         if self.debug:
             movement = np.hypot(dx_world, dy_world)
@@ -213,6 +222,8 @@ class MonoVideoOdometry:
             return
 
         dx_pixels, dy_pixels = self.get_pixel_displacement()
+        if dx_pixels is None:
+            return
 
         self.update_position(dx_pixels, dy_pixels)
 
