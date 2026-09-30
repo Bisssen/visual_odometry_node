@@ -14,7 +14,7 @@ import math
 from px4_msgs.msg import VehicleOdometry
 
 # from src.fisheye import FisheyeUndistorter
-from src.mono_video_odometry import MonoVideoOdometry, quaternion_to_yaw
+from src.mono_video_odometry import MonoVideoOdometry
 
 class VONode(Node):
     def __init__(self):
@@ -110,7 +110,7 @@ class VONode(Node):
 
     def odom_callback(self, msg):
         self.latest_height = msg.position[2] * -1  # if you're using this for height too
-        self.latest_yaw = quaternion_to_yaw(msg.q) + 1.57
+        self.latest_attitude = np.array(msg.q)
  
 
     
@@ -121,7 +121,7 @@ class VONode(Node):
                 self.get_logger().warn('No distance measurement')
                 continue
 
-            if self.latest_yaw is None:
+            if self.latest_attitude is None:
                 time.sleep(0.1)
                 self.get_logger().warn('No odometry measurement')
                 continue
@@ -132,13 +132,13 @@ class VONode(Node):
 
 
             z = self.latest_height
-            yaw = self.latest_yaw
+            attitude = self.latest_attitude
             tmp_image = self.latest_image.copy()
             self.latest_image = None
 
 
             self.get_logger().info('processing image')
-            self.vo.process_frame(tmp_image, z, yaw)
+            self.vo.process_frame(tmp_image, z, attitude)
             x, y = self.vo.get_position()
             
             # Publish as Pose2D

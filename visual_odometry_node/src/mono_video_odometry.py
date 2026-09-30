@@ -1,27 +1,31 @@
 import math, cv2
 import numpy as np
 
-def quaternion_to_yaw(q: list[float] | np.ndarray) -> float:
+
+# def quaternion_to_yaw(q: list[float] | np.ndarray) -> float:
+#     """
+#     Extract yaw (rotation about Z) from a PX4 VehicleOdometry quaternion.
+#     q is [w, x, y, z] as published by PX4 (q[0]=w, q[1]=x, q[2]=y, q[3]=z).
+#     Returns yaw in radians.
+#     """
+#     w, x, y, z = q[0], q[1], q[2], q[3]
+#     siny_cosp = 2.0 * (w * z + x * y)
+#     cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+#     return math.atan2(siny_cosp, cosy_cosp)
+
+
+def quaternion_to_rotation_matrix(q: list[float] | np.ndarray) -> np.ndarray:
     """
-    Extract yaw (rotation about Z) from a PX4 VehicleOdometry quaternion.
+    Build a 3x3 rotation matrix from a PX4 VehicleOdometry quaternion.
     q is [w, x, y, z] as published by PX4 (q[0]=w, q[1]=x, q[2]=y, q[3]=z).
-    Returns yaw in radians.
+    Transforms body-frame vectors into world-frame.
     """
     w, x, y, z = q[0], q[1], q[2], q[3]
-    siny_cosp = 2.0 * (w * z + x * y)
-    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
-    return math.atan2(siny_cosp, cosy_cosp)
- 
- 
-def rotate_by_yaw(dx_body: float, dy_body: float, yaw: float) -> tuple[float, float]:
-    """
-    Rotate a body-frame displacement (forward, right) into the world frame
-    using the current yaw angle.
-    """
-    dx_world = dx_body * math.cos(yaw) - dy_body * math.sin(yaw)
-    dy_world = dx_body * math.sin(yaw) + dy_body * math.cos(yaw)
-    return dx_world, dy_world
- 
+    return np.array([
+        [1 - 2*(y*y + z*z),   2*(x*y - w*z),       2*(x*z + w*y)],
+        [2*(x*y + w*z),       1 - 2*(x*x + z*z),   2*(y*z - w*x)],
+        [2*(x*z - w*y),       2*(y*z + w*x),       1 - 2*(x*x + y*y)]
+    ])
 
 
 class MonoVideoOdometry:
@@ -31,17 +35,17 @@ class MonoVideoOdometry:
                 image_height: int = 720,
                 image_width: int = 1280,
                 debug: bool = False,
-                lk_params: dict = dict(winSize=(21, 21), 
-                                    criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01)),
+                lk_params: dict = dict(winSize=(21, 21),
+                                       criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01)),
                 detector: cv2.FastFeatureDetector = cv2.FastFeatureDetector_create(threshold=25)):
-        
-        self.debug: bool = debug          # Enable debug visualisation and print statements
+
+        self.debug: bool = debug                     # Enable debug visualisation and print statements
         self.detector: cv2.FastFeatureDetector = detector    # Feature detector (unused; replaced by goodFeaturesToTrack)
-        self.lk_params: dict = lk_params  # Lucas-Kanade optical flow parameters
-        self.n_features: int = 0          # Number of currently tracked features
-        self.attitude: list[float] = [0.0, 0.0, 0.0]             # Current yaw angle in radians, updated each frame
-        self.height: float = 0.0
-        
+        self.lk_params: dict = lk_params             # Lucas-Kanade optical flow parameters
+        self.n_features: int = 0                     # Number of currently tracked features
+        self.attitude: np.ndarray = np.array([1.0, 0.0, 0.0, 0.0])  # Current attitude quaternion [w, x, y, z]
+        self.height: float = 0.0                     # Current height above ground (metres)
+
         # Camera intrinsic matrix (K), built from focal lengths and principal point
         cx: float = image_width / 2
         cy: float = image_height / 2
@@ -50,16 +54,16 @@ class MonoVideoOdometry:
             [0.0, image_fy, cy],
             [0.0, 0.0, 1.0]
         ], dtype=np.float64)
-        
-        self.x: float = 0.0                            # Accumulated world-frame X position (metres)
-        self.y: float = 0.0                            # Accumulated world-frame Y position (metres)
-        self.p0: np.ndarray | None = None              # Feature points in the previous frame
-        self.old_frame: np.ndarray | None = None       # Previous greyscale frame
-        self.current_frame: np.ndarray | None = None   # Current greyscale frame
-        self.good_old: np.ndarray | None = None        # Successfully tracked points in old frame
-        self.good_new: np.ndarray | None = None        # Corresponding tracked points in current frame
-        self.p1: np.ndarray | None = None              # Raw optical flow output points
- 
+
+        self.x: float = 0.0                             # Accumulated world-frame X position (metres)
+        self.y: float = 0.0                             # Accumulated world-frame Y position (metres)
+        self.p0: np.ndarray | None = None               # Feature points in the previous frame
+        self.old_frame: np.ndarray | None = None        # Previous greyscale frame
+        self.current_frame: np.ndarray | None = None    # Current greyscale frame
+        self.good_old: np.ndarray | None = None         # Successfully tracked points in old frame
+        self.good_new: np.ndarray | None = None         # Corresponding tracked points in current frame
+        self.p1: np.ndarray | None = None               # Raw optical flow output points
+
     def detect(self, img: np.ndarray) -> np.ndarray:
         points = cv2.goodFeaturesToTrack(
             img,
@@ -69,10 +73,8 @@ class MonoVideoOdometry:
             blockSize=7
         )
 
-
         if points is None:
             return np.empty((0, 1, 2), dtype=np.float32)
-
 
         return points
 
@@ -144,48 +146,17 @@ class MonoVideoOdometry:
 
         if len(flow_good) < 10:
             print("Not enough good flow")
-            return None,  None
+            return None, None
 
         # Robust estimate of image displacement
         dx_pixels, dy_pixels = np.median(flow_good, axis=0)
         return dx_pixels, dy_pixels
 
-    # def update_position(self, dx_pixels: float, dy_pixels: float, height: float) -> None:
-    #     """
-    #     Convert pixel displacement to metric ground displacement, integrate into
-    #     world position, and update the tracked feature set for the next frame.
-    #     """
-    #     # ---------------------------------------------------------
-    #     # Convert pixels -> meters on ground
-    #     # ---------------------------------------------------------
-
-    #     fx = self.K[0, 0]
-    #     fy = self.K[1, 1]
-
-    #     dx_ground = -dx_pixels * height / fx
-    #     dy_ground = -dy_pixels * height / fy
-
-
-    #     if self.debug:
-    #         movement = np.hypot(dx_ground, dy_ground)
-
-    #         print(
-    #             f"dx={dx_ground:.4f} m, "
-    #             f"dy={dy_ground:.4f} m, "
-    #             f"movement={movement:.4f} m"
-    #         )
-
-    #     # Rotate and integrate
-    #     dx_world, dy_world = rotate_by_yaw(dx_ground, dy_ground, self.yaw)
-    #     self.x += dx_world * 2.2
-    #     self.y += dy_world * 2.2
-
-    #     self.p0 = self.good_new.reshape(-1, 1, 2)  # ← track survivors next frame
-    #     self.n_features = len(self.p0)              # ← add thi
     def update_position(self, dx_pixels: float, dy_pixels: float) -> None:
         """
         Convert pixel displacement to metric ground displacement, correct for
-        roll and pitch, integrate into world position, and update tracked features.
+        the full attitude (roll, pitch, yaw) via the quaternion rotation matrix,
+        integrate into world position, and update tracked features.
         """
         fx = self.K[0, 0]
         fy = self.K[1, 1]
@@ -197,10 +168,10 @@ class MonoVideoOdometry:
         dy_cam = -dy_pixels / fy
 
         # ---------------------------------------------------------
-        # Correct for roll and pitch by rotating into world frame
+        # Correct for attitude by rotating into world frame,
         # then scale by height to get ground-plane displacement
         # ---------------------------------------------------------
-        R = rotation_matrix(roll, pitch, self.yaw)
+        R = quaternion_to_rotation_matrix(self.attitude)
 
         # Camera-frame displacement as a vector (z=0, we only have 2D flow)
         cam_vec = np.array([dx_cam, dy_cam, 0.0])
@@ -211,7 +182,7 @@ class MonoVideoOdometry:
         # Scale by height — divide by the z-component of the nadir direction
         # (how much of the camera's z-axis points at the ground after tilting)
         nadir = R @ np.array([0.0, 0.0, 1.0])
-        scale = self.height / nadir[2] if abs(nadir[2]) > 0.01 else height
+        scale = self.height / nadir[2] if abs(nadir[2]) > 0.01 else self.height
 
         dx_world = world_vec[0] * scale
         dy_world = world_vec[1] * scale
@@ -245,17 +216,19 @@ class MonoVideoOdometry:
 
         self.update_position(dx_pixels, dy_pixels)
 
-
-    def process_frame(self, frame: np.ndarray, height: float, yaw: float) -> None:
-        self.yaw = yaw
+    def process_frame(self, frame: np.ndarray, height: float, attitude: list[float] | np.ndarray) -> None:
+        """
+        Accept a new frame along with the current height and attitude quaternion [w, x, y, z],
+        and run visual odometry if a previous frame exists.
+        """
         self.height = height
+        self.attitude = attitude
         if self.current_frame is None:
             self.current_frame = frame
         else:
             self.old_frame = self.current_frame
             self.current_frame = frame
             self.visual_odometry()
-            
+
     def get_position(self) -> tuple[float, float]:
         return self.x, self.y
-
