@@ -92,9 +92,6 @@ class VONode(Node):
 
         threading.Thread(target=self.vo_loop, daemon=True).start()
 
-        # if self.debug:
-        #     self.timer = self.create_timer(0.1, self.timer_callback)
-        
         self.get_logger().info('Visual Odometry Node Started')
     
     def image_callback(self, msg):
