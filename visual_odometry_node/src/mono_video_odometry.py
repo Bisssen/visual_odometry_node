@@ -71,6 +71,7 @@ class MonoVideoOdometry:
         self.good_old: np.ndarray | None = None         # Successfully tracked points in old frame
         self.good_new: np.ndarray | None = None         # Corresponding tracked points in current frame
         self.p1: np.ndarray | None = None               # Raw optical flow output points
+        self.scalar: float = 1                          # Used to correct the position estimate, if the intrinsic camera parameters are not known (Use 1 if they are correct)
 
     def detect(self, img: np.ndarray) -> np.ndarray:
         points = cv2.goodFeaturesToTrack(
@@ -204,8 +205,9 @@ class MonoVideoOdometry:
                 f"movement={movement:.4f} m"
             )
 
-        self.x += dx_world * 2.2
-        self.y += dy_world * 2.2
+
+        self.x += dx_world * self.scalar
+        self.y += dy_world * self.scalar
 
         self.p0 = self.good_new.reshape(-1, 1, 2)  # ← track survivors next frame
         self.n_features = len(self.p0)              # ← add thi

@@ -32,6 +32,7 @@ class VONode(Node):
         self.declare_parameter('image_height', 720)
         self.declare_parameter('image_width', 1280)
         self.declare_parameter('debug', False)
+        self.declare_parameter('image_down_scale', 0.5)
         
         # Get parameters
         image_fx = self.get_parameter('image_fx').value
@@ -39,7 +40,7 @@ class VONode(Node):
         image_height = self.get_parameter('image_height').value
         image_width = self.get_parameter('image_width').value
         self.debug = self.get_parameter('debug').value
-        print(self.debug, type(self.debug))
+        self.image_down_scale = self.get_parameter('image_down_scale').value
 
         # self.udistorter = FisheyeUndistorter(2704, 1540, 150, balance=0.0)
         
@@ -107,8 +108,11 @@ class VONode(Node):
         # Convert to grayscale
         gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
         
-        SCALE = 0.5
-        self.latest_image = cv2.resize(gray, (0, 0), fx=SCALE, fy=SCALE)
+        self.latest_image = cv2.resize(
+            gray,
+            (0, 0), 
+            x=self.image_down_scale,
+            fy=self.image_down_scale)
 
     def height_callback(self, msg):
         # self.latest_height = msg.data
@@ -118,8 +122,6 @@ class VONode(Node):
         self.latest_height = msg.position[2] * -1  # if you're using this for height too
         self.latest_attitude = np.array(msg.q)
  
-
-    
     def vo_loop(self):
         while True:
             if self.latest_height is None:
