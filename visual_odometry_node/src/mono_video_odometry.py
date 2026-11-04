@@ -40,38 +40,63 @@ class MonoVideoOdometry:
     def __init__(self,
                 image_fx: float = 736.9205,
                 image_fy: float = 738.6126,
-                image_height: int = 720,
-                image_width: int = 1280,
+                image_height: int | None = None,
+                image_width: int | None = None,
                 debug: bool = False,
                 lk_params: dict = dict(winSize=(21, 21),
-                                       criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01)),
+                                        criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01)),
                 detector: cv2.FastFeatureDetector = cv2.FastFeatureDetector_create(threshold=25)):
 
-        self.debug: bool = debug                     # Enable debug visualisation and print statements
-        self.detector: cv2.FastFeatureDetector = detector    # Feature detector (unused; replaced by goodFeaturesToTrack)
-        self.lk_params: dict = lk_params             # Lucas-Kanade optical flow parameters
-        self.n_features: int = 0                     # Number of currently tracked features
-        self.attitude: np.ndarray = np.array([1.0, 0.0, 0.0, 0.0])  # Current attitude quaternion [w, x, y, z]
-        self.height: float = 0.0                     # Current height above ground (metres)
+        self.debug: bool = debug
+        self.detector: cv2.FastFeatureDetector = detector
+        self.lk_params: dict = lk_params
+        self.n_features: int = 0
+        self.attitude: np.ndarray = np.array([1.0, 0.0, 0.0, 0.0])
+        self.height: float = 0.0
 
-        # Camera intrinsic matrix (K), built from focal lengths and principal point
-        cx: float = image_width / 2
-        cy: float = image_height / 2
-        self.K: np.ndarray = np.array([
-            [image_fx, 0.0, cx],
-            [0.0, image_fy, cy],
+        self.image_fx = image_fx
+        self.image_fy = image_fy
+
+        if image_height is None or image_width is None:
+            self.K: np.ndarray | None = None
+        else:
+            self._build_K(image_fx, image_fy, image_width, image_height)
+
+        self.x: float = 0.0
+        self.y: float = 0.0
+        self.p0: np.ndarray | None = None
+        self.old_frame: np.ndarray | None = None
+        self.current_frame: np.ndarray | None = None
+        self.good_old: np.ndarray | None = None
+        self.good_new: np.ndarray | None = None
+        self.p1: np.ndarray | None = None
+        self.scalar: float = 1
+
+    def _build_K(self, fx: float, fy: float, width: int, height: int) -> None:
+        cx = width / 2
+        cy = height / 2
+        self.K = np.array([
+            [fx,  0.0, cx],
+            [0.0, fy,  cy],
             [0.0, 0.0, 1.0]
         ], dtype=np.float64)
 
-        self.x: float = 0.0                             # Accumulated world-frame X position (metres)
-        self.y: float = 0.0                             # Accumulated world-frame Y position (metres)
-        self.p0: np.ndarray | None = None               # Feature points in the previous frame
-        self.old_frame: np.ndarray | None = None        # Previous greyscale frame
-        self.current_frame: np.ndarray | None = None    # Current greyscale frame
-        self.good_old: np.ndarray | None = None         # Successfully tracked points in old frame
-        self.good_new: np.ndarray | None = None         # Corresponding tracked points in current frame
-        self.p1: np.ndarray | None = None               # Raw optical flow output points
-        self.scalar: float = 1                          # Used to correct the position estimate, if the intrinsic camera parameters are not known (Use 1 if they are correct)
+    def set_image_size(self, width: int, height: int) -> None:
+        """Update K for the actual image size being processed."""
+        self._build_K(self.image_fx, self.image_fy, width, height)
+
+    def process_frame(self, frame: np.ndarray, height: float, attitude: list[float] | np.ndarray) -> None:
+        if self.K is None:
+            return  # Can't run without calibration matrix
+
+        self.height = height
+        self.attitude = attitude
+        if self.current_frame is None:
+            self.current_frame = frame
+        else:
+            self.old_frame = self.current_frame
+            self.current_frame = frame
+            self.visual_odometry()
 
     def detect(self, img: np.ndarray) -> np.ndarray:
         points = cv2.goodFeaturesToTrack(
@@ -229,19 +254,6 @@ class MonoVideoOdometry:
 
         self.update_position(dx_pixels, dy_pixels)
 
-    def process_frame(self, frame: np.ndarray, height: float, attitude: list[float] | np.ndarray) -> None:
-        """
-        Accept a new frame along with the current height and attitude quaternion [w, x, y, z],
-        and run visual odometry if a previous frame exists.
-        """
-        self.height = height
-        self.attitude = attitude
-        if self.current_frame is None:
-            self.current_frame = frame
-        else:
-            self.old_frame = self.current_frame
-            self.current_frame = frame
-            self.visual_odometry()
 
     def get_position(self) -> tuple[float, float]:
         return self.x, self.y

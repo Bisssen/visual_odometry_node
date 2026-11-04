@@ -14,7 +14,7 @@ import math
 from px4_msgs.msg import VehicleOdometry
 
 # from src.fisheye import FisheyeUndistorter
-from .src.mono_video_odometry import MonoVideoOdometry
+from visual_odometry_node.src.mono_video_odometry import MonoVideoOdometry
 
 # TODO
 # Cap the estimate update based on time based and a max speed, e.g. 20 m/s? Can also measure it
@@ -27,12 +27,12 @@ class VONode(Node):
         super().__init__('vo_node')
         
         # Declare parameters
-        self.declare_parameter('image_fx', 736.9205)
-        self.declare_parameter('image_fy', 738.6126)
-        self.declare_parameter('image_height', 720)
-        self.declare_parameter('image_width', 1280)
+        self.declare_parameter('image_fx', 281.7927)  #736.9205)
+        self.declare_parameter('image_fy', 266.0973)  #738.6126)
+        self.declare_parameter('image_height', None)
+        self.declare_parameter('image_width', None)
         self.declare_parameter('debug', False)
-        self.declare_parameter('image_down_scale', 0.5)
+        self.declare_parameter('image_down_scale', 1.0)  #0.5)
         
         # Get parameters
         image_fx = self.get_parameter('image_fx').value
@@ -55,8 +55,8 @@ class VONode(Node):
         
         # Initialize visual odometry
         self.vo = MonoVideoOdometry(
-            image_fx=image_fx,
-            image_fy=image_fy,
+            image_fx=image_fx * self.image_down_scale,
+            image_fy=image_fy * self.image_down_scale,
             image_height=image_height,
             image_width=image_width,
             debug=self.get_parameter('debug').value
@@ -108,11 +108,19 @@ class VONode(Node):
         # Convert to grayscale
         gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
         
-        self.latest_image = cv2.resize(
+        scaled = cv2.resize(
             gray,
-            (0, 0), 
-            x=self.image_down_scale,
-            fy=self.image_down_scale)
+            (0, 0),
+            fx=self.image_down_scale,
+            fy=self.image_down_scale
+        )
+
+        # Set K on first frame with the actual scaled size
+        if self.vo.K is None:
+            h, w = scaled.shape
+            self.vo.set_image_size(w, h)
+
+        self.latest_image = scaled
 
     def height_callback(self, msg):
         # self.latest_height = msg.data
