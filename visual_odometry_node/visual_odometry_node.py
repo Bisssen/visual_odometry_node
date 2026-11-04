@@ -27,6 +27,16 @@ class VONode(Node):
         super().__init__('vo_node')
         
         # Declare parameters
+        # Narrow
+        # fx: 776.3768
+        # fy: 715.3081
+        # Wide
+        # fx: 281.7927
+        # fy: 266.0973
+        # A8 mini
+        # fx: 736.9205
+        # fy: 738.6126
+
         self.declare_parameter('image_fx', 281.7927)  #736.9205)
         self.declare_parameter('image_fy', 266.0973)  #738.6126)
         self.declare_parameter('image_height', None)

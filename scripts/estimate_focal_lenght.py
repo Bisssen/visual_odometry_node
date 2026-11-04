@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-df = pd.read_csv('trajectory_1_scale.csv')
+df = pd.read_csv('trajectory_narrow.csv')
 odom = df[df['source'] == 'odom'].sort_values('timestamp').reset_index(drop=True)
 vo = df[df['source'] == 'vo'].sort_values('timestamp').reset_index(drop=True)
 
@@ -114,8 +114,8 @@ mask_y = np.abs(vo_dy) > min_motion
 scale_x = np.median(odom_dx[mask_x] / vo_dx[mask_x])
 scale_y = np.median(odom_dy[mask_y] / vo_dy[mask_y])
 
-fx_default = 736.9205
-fy_default = 738.6126
+fx_default = 740#736.9205
+fy_default = 704#738.6126
 
 fx_for_vo = fx_default / scale_x
 fy_for_vo = fy_default / scale_y
