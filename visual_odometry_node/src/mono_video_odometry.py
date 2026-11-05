@@ -74,6 +74,8 @@ class MonoVideoOdometry:
         self.last_time: float | None = None  # The time which the last measurement was made at
         self.speed: float = 0.0
         self.speed_limit: float = 50.0
+        self.max_fps: float = 1000
+        self.last_process_time: float | None = None
 
 
     def _build_K(self, fx: float, fy: float, width: int, height: int) -> None:
@@ -95,6 +97,12 @@ class MonoVideoOdometry:
 
         if abs(height) < 50:
             return
+
+        now = time.time()
+        min_dt = 1.0 / self.max_fps
+        if (self.last_process_time is not None) and (now - self.last_process_time < min_dt):
+            return
+        self.last_process_time = now
 
         self.height = height
         self.attitude = attitude

@@ -43,8 +43,8 @@ def run_bag(bag_path):
         # 1. VO node
         procs.append(subprocess.Popen(
             ['ros2', 'run', 'visual_odometry_node', 'visual_odometry_node'],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            # stdout=subprocess.DEVNULL,
+            # stderr=subprocess.DEVNULL
         ))
 
         time.sleep(2)

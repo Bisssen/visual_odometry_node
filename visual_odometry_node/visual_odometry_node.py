@@ -147,7 +147,7 @@ class VONode(Node):
     def match_odom_to_image(self, image_t):
         """Find the odom measurement closest in time to the given image timestamp."""
         if not self.odom_buffer:
-            return None, None
+            return None
         best = min(self.odom_buffer, key=lambda o: abs(o['t'] - image_t))
         # dt = abs(best['t'] - image_t)
         return best
@@ -169,6 +169,7 @@ class VONode(Node):
                 time.sleep(0.1)
                 continue
 
+            print(odom)
             z = odom['height']
             attitude = odom['attitude']
 
