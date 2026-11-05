@@ -1,6 +1,6 @@
 import math, cv2
 import numpy as np
-
+import time
 
 # def quaternion_to_yaw(q: list[float] | np.ndarray) -> float:
 #     """
@@ -71,6 +71,10 @@ class MonoVideoOdometry:
         self.good_new: np.ndarray | None = None
         self.p1: np.ndarray | None = None
         self.scalar: float = 1
+        self.last_time: float | None = None  # The time which the last measurement was made at
+        self.speed: float = 0.0
+        self.speed_limit: float = 50.0
+
 
     def _build_K(self, fx: float, fy: float, width: int, height: int) -> None:
         cx = width / 2
@@ -88,6 +92,9 @@ class MonoVideoOdometry:
     def process_frame(self, frame: np.ndarray, height: float, attitude: list[float] | np.ndarray) -> None:
         if self.K is None:
             return  # Can't run without calibration matrix
+
+        if abs(height) < 50:
+            return
 
         self.height = height
         self.attitude = attitude
@@ -231,11 +238,39 @@ class MonoVideoOdometry:
             )
 
 
-        self.x += dx_world * self.scalar
-        self.y += dy_world * self.scalar
+        dx_limited, dy_limited = self.limit_speed(
+            dx_world * self.scalar,
+            dy_world * self.scalar
+        )
+
+        self.x += dx_limited
+        self.y += dy_limited
 
         self.p0 = self.good_new.reshape(-1, 1, 2)  # ← track survivors next frame
         self.n_features = len(self.p0)              # ← add thi
+
+
+    def limit_speed(self, dx: float, dy: float) -> tuple[float, float]:
+        now = time.time()
+        if self.last_time is None:
+            self.last_time = now
+            return dx, dy
+
+        dt = now - self.last_time
+        self.last_time = now
+
+        if dt <= 0:
+            return dx, dy
+
+        speed = np.hypot(dx, dy) / dt
+        self.speed = float(speed)
+        if speed > self.speed_limit:
+            scale = (self.speed_limit * dt) / np.hypot(dx, dy)
+            dx *= scale
+            dy *= scale
+
+        return dx, dy
+
 
     def visual_odometry(self) -> None:
         # Detect new features if too many are lost

@@ -44,21 +44,53 @@ class TrajectoryRecorder(Node):
         self.odom_x, self.odom_y = [], []
         self.vo_x, self.vo_y = [], []
 
+        self.odom_origin: tuple | None = None  # (x, y, z) of first valid odom
+        self.vo_origin: tuple | None = None    # (x, y, z) of first valid vo
+
         self.get_logger().info('Recording trajectory, plotting live...')
 
     def odom_callback(self, msg: VehicleOdometry):
+        z = msg.position[2]
+        if abs(z) < 50:
+            return
+
         t = self.get_clock().now().nanoseconds / 1e9
+        x, y = msg.position[0], msg.position[1]
+
         with self.lock:
-            self.odom_data.append((t, msg.position[0], msg.position[1], msg.position[2]))
-            self.odom_x.append(msg.position[0])
-            self.odom_y.append(msg.position[1])
+            if self.odom_origin is None:
+                self.odom_origin = (x, y, z)
+                self.get_logger().info(f'Odom origin set: x={x:.2f} y={y:.2f} z={z:.2f}')
+
+            ox, oy, oz = self.odom_origin
+            x -= ox
+            y -= oy
+            z -= oz
+
+            self.odom_data.append((t, x, y, z))
+            self.odom_x.append(x)
+            self.odom_y.append(y)
 
     def vo_callback(self, msg: Point):
+        z = msg.z
+        if abs(z) < 50:
+            return
+
         t = self.get_clock().now().nanoseconds / 1e9
+        x, y = msg.x, msg.y
+
         with self.lock:
-            self.vo_data.append((t, msg.x, msg.y, msg.z))
-            self.vo_x.append(msg.x)
-            self.vo_y.append(msg.y)
+            if self.vo_origin is None:
+                self.vo_origin = (x, y, z)
+                self.get_logger().info(f'VO origin set: x={x:.2f} y={y:.2f} z={z:.2f}')
+
+            ox, oy, oz = self.vo_origin
+            x -= ox
+            y -= oy
+
+            self.vo_data.append((t, x, y, z))
+            self.vo_x.append(x)
+            self.vo_y.append(y)
 
     def get_data(self):
         with self.lock:
@@ -89,9 +121,6 @@ def main(args=None):
     import sys
     csv_name = sys.argv[1] if len(sys.argv) > 1 else 'trajectory.csv'
 
-    print('hi------')
-    print(csv_name.split('/'))
-    print('------------')
     rclpy.init(args=None)
     node = TrajectoryRecorder()
 

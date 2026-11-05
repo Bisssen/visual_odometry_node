@@ -10,17 +10,12 @@ import cv2
 import numpy as np
 import threading
 import time
-import math
+import collections
 from px4_msgs.msg import VehicleOdometry
 
 # from src.fisheye import FisheyeUndistorter
 from visual_odometry_node.src.mono_video_odometry import MonoVideoOdometry
 
-# TODO
-# Cap the estimate update based on time based and a max speed, e.g. 20 m/s? Can also measure it
-# See if I cant find and use the correct camera parameters and see how it looks without manual tuning
-# Could also esimate the speed (We already do this) and then low pass filter it (idk 10 % new 90 % old)
-# # and then use the filtered speed for the position update
 
 class VONode(Node):
     def __init__(self):
@@ -74,8 +69,10 @@ class VONode(Node):
         
         # Data storage
         self.latest_image = None
-        self.latest_height = None
-        self.latest_yaw = None
+        # self.latest_height = None
+        # self.latest_yaw = None
+        self.odom_buffer = collections.deque(maxlen=30)
+        self.latest_image_t = None
         
         # Subscribers
         self.image_sub = self.create_subscription(
@@ -131,36 +128,49 @@ class VONode(Node):
             self.vo.set_image_size(w, h)
 
         self.latest_image = scaled
+        self.latest_image_t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
 
     def height_callback(self, msg):
         # self.latest_height = msg.data
         pass
 
     def odom_callback(self, msg):
-        self.latest_height = msg.position[2] * -1  # if you're using this for height too
-        self.latest_attitude = np.array(msg.q)
+        # self.latest_height = msg.position[2] * -1  # if you're using this for height too
+        # self.latest_attitude = np.array(msg.q)
+        t = msg.timestamp * 1e-6
+        self.odom_buffer.append({
+            't': t,
+            'height': msg.position[2] * -1,
+            'attitude': np.array(msg.q)
+        })
+
+    def match_odom_to_image(self, image_t):
+        """Find the odom measurement closest in time to the given image timestamp."""
+        if not self.odom_buffer:
+            return None, None
+        best = min(self.odom_buffer, key=lambda o: abs(o['t'] - image_t))
+        # dt = abs(best['t'] - image_t)
+        return best
  
     def vo_loop(self):
         while True:
-            if self.latest_height is None:
-                time.sleep(0.1)
-                self.get_logger().warn('No distance measurement')
-                continue
-
-            if self.latest_attitude is None:
-                time.sleep(0.1)
-                self.get_logger().warn('No odometry measurement')
-                continue
-
-            if self.latest_image is None:
+            if self.latest_image is None or self.latest_image_t is None:
                 time.sleep(0.001)
                 continue
 
-
-            z = self.latest_height
-            attitude = self.latest_attitude
+            image_t = self.latest_image_t
             tmp_image = self.latest_image.copy()
             self.latest_image = None
+            self.latest_image_t = None
+
+            odom = self.match_odom_to_image(image_t)
+            if odom is None:
+                self.get_logger().warn('No distance measurement')
+                time.sleep(0.1)
+                continue
+
+            z = odom['height']
+            attitude = odom['attitude']
 
 
             self.get_logger().info('processing image')

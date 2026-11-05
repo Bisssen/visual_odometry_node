@@ -66,14 +66,14 @@ def run_bag(bag_path):
         )
         procs.append(bag_proc)
 
-        try:
-            bag_proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            bag_proc.send_signal(signal.SIGINT)
-            bag_proc.wait()
-            print('Bag stopped after 10s')
+        # try:
+        #     bag_proc.wait(timeout=10)
+        # except subprocess.TimeoutExpired:
+        #     bag_proc.send_signal(signal.SIGINT)
+        #     bag_proc.wait()
+        #     print('Bag stopped after 10s')
 
-        # bag_proc.wait()
+        bag_proc.wait()
         # _, stderr = bag_proc.communicate()
         # print(f'Bag returncode: {bag_proc.returncode}')
         # if stderr:
