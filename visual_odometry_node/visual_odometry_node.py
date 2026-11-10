@@ -32,8 +32,8 @@ class VONode(Node):
         # fx: 736.9205
         # fy: 738.6126
 
-        self.declare_parameter('image_fx', 281.7927)  #736.9205)
-        self.declare_parameter('image_fy', 266.0973)  #738.6126)
+        self.declare_parameter('image_fx', 776.3768)  #736.9205)
+        self.declare_parameter('image_fy', 715.3081)  #738.6126)
         self.declare_parameter('image_height', None)
         self.declare_parameter('image_width', None)
         self.declare_parameter('debug', False)
