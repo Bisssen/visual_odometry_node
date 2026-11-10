@@ -8,7 +8,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy
 
 from px4_msgs.msg import VehicleOdometry
-from geometry_msgs.msg import Point
+from geometry_msgs.msg import Point, PoseStamped
 
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -37,15 +37,35 @@ class TrajectoryRecorder(Node):
             10
         )
 
+        self.dr_sub = self.create_subscription(
+            Point,
+            '/imu_dead_reckoning/pose',
+            self.dr_callback,
+            10
+        )
+
+        self.vio_sub = self.create_subscription(
+            PoseStamped,
+            '/vvhub_aligned_vio',
+            self.vio_callback,
+            qos
+        )
+
         self.lock = threading.Lock()
-        self.odom_data = []  # (timestamp, x, y, z)
-        self.vo_data = []    # (timestamp, x, y, z)
+        self.odom_data = []
+        self.vo_data = []
+        self.dr_data = []
+        self.vio_data = []
 
         self.odom_x, self.odom_y = [], []
         self.vo_x, self.vo_y = [], []
+        self.dr_x, self.dr_y = [], []
+        self.vio_x, self.vio_y = [], []
 
-        self.odom_origin: tuple | None = None  # (x, y, z) of first valid odom
-        self.vo_origin: tuple | None = None    # (x, y, z) of first valid vo
+        self.odom_origin = None
+        self.vo_origin = None
+        self.dr_origin = None
+        self.vio_origin = None
 
         self.get_logger().info('Recording trajectory, plotting live...')
 
@@ -92,17 +112,63 @@ class TrajectoryRecorder(Node):
             self.vo_x.append(x)
             self.vo_y.append(y)
 
+    def dr_callback(self, msg: Point):
+        t = self.get_clock().now().nanoseconds / 1e9
+        x, y, z = msg.x, msg.y, msg.z
+
+        # x, y = -y, x
+
+        with self.lock:
+            if self.dr_origin is None:
+                self.dr_origin = (x, y, z)
+                self.get_logger().info(f'DR origin set: x={x:.2f} y={y:.2f} z={z:.2f}')
+
+            ox, oy, oz = self.dr_origin
+            x -= ox
+            y -= oy
+            z -= oz
+
+            self.dr_data.append((t, x, y, z))
+            self.dr_x.append(x)
+            self.dr_y.append(y)
+
+    def vio_callback(self, msg: PoseStamped):
+        x = msg.pose.position.x
+        y = msg.pose.position.y
+        z = msg.pose.position.z
+        t = self.get_clock().now().nanoseconds / 1e9
+
+        x, y = -y, x
+
+        with self.lock:
+            if self.vio_origin is None:
+                self.vio_origin = (x, y, z)
+                self.get_logger().info(f'VIO origin set: x={x:.2f} y={y:.2f} z={z:.2f}')
+
+            ox, oy, oz = self.vio_origin
+            x -= ox
+            y -= oy
+            z -= oz
+
+            self.vio_data.append((t, x, y, z))
+            self.vio_x.append(x)
+            self.vio_y.append(y)
+
     def get_data(self):
         with self.lock:
             return (
                 list(self.odom_x), list(self.odom_y),
-                list(self.vo_x), list(self.vo_y)
+                list(self.vo_x), list(self.vo_y),
+                list(self.dr_x), list(self.dr_y),
+                list(self.vio_x), list(self.vio_y),
             )
 
     def save_csv(self, path='trajectory.csv'):
         with self.lock:
             odom_data = list(self.odom_data)
             vo_data = list(self.vo_data)
+            dr_data = list(self.dr_data)
+            vio_data = list(self.vio_data)
 
         with open(path, 'w', newline='') as f:
             writer = csv.writer(f)
@@ -110,9 +176,12 @@ class TrajectoryRecorder(Node):
 
             for (t, x, y, z) in odom_data:
                 writer.writerow(['odom', f'{t:.6f}', x, y, z])
-
             for (t, x, y, z) in vo_data:
                 writer.writerow(['vo', f'{t:.6f}', x, y, z])
+            for (t, x, y, z) in dr_data:
+                writer.writerow(['dr', f'{t:.6f}', x, y, z])
+            for (t, x, y, z) in vio_data:
+                writer.writerow(['vio', f'{t:.6f}', x, y, z])
 
         self.get_logger().info(f'Saved trajectory to {path}')
 
@@ -128,22 +197,26 @@ def main(args=None):
     spin_thread.start()
 
     fig, ax = plt.subplots(figsize=(8, 8))
-    odom_line, = ax.plot([], [], label='PX4 odometry', linewidth=1.5)
-    vo_line, = ax.plot([], [], label='Visual odometry', linewidth=1.5)
-    ax.set_xlabel('East (m)')
-    ax.set_ylabel('North (m)')
+    odom_line, = ax.plot([], [], label='PX4 odometry',    linewidth=1.5)
+    vo_line,   = ax.plot([], [], label='Visual odometry',  linewidth=1.5)
+    dr_line,   = ax.plot([], [], label='IMU dead reckoning', linewidth=1.5, linestyle='--')
+    vio_line,  = ax.plot([], [], label='VIO (aligned)',    linewidth=1.5, linestyle='--')
+    ax.set_xlabel('X (m)')
+    ax.set_ylabel('Y (m)')
     ax.set_title(f'Live Trajectory — {csv_name.split("/")[-1]}')
     ax.axis('equal')
     ax.grid(True)
     ax.legend()
 
     def update(frame):
-        odom_x, odom_y, vo_x, vo_y = node.get_data()
+        odom_x, odom_y, vo_x, vo_y, dr_x, dr_y, vio_x, vio_y = node.get_data()
         odom_line.set_data(odom_y, odom_x)
         vo_line.set_data(vo_y, vo_x)
+        dr_line.set_data(dr_y, dr_x)
+        vio_line.set_data(vio_y, vio_x)
         ax.relim()
         ax.autoscale_view()
-        return odom_line, vo_line
+        return odom_line, vo_line, dr_line, vio_line
 
     def handle_sigint(sig, frame):
         plt.close('all')
